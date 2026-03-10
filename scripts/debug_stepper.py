@@ -123,6 +123,7 @@ def main():
         path_to_pkl = os.path.join(args.path, "experiment.pkl")
 
     # load experiment args
+    # 使用pickle加载实验配置文件，其中包含训练时的参数设置（如环境名称、超参数等）
     run_args = pickle.load(open(path_to_pkl, "rb"))
     # load trained policy
     policy = torch.load(path_to_actor)
