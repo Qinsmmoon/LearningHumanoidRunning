@@ -24,357 +24,207 @@ class Actor(Net):
         raise NotImplementedError
 
 
-class Linear_Actor(Actor):
-    """线性策略网络 - 最简单的策略网络实现"""
-
-    def __init__(self, state_dim, action_dim, hidden_size=32):
-        super(Linear_Actor, self).__init__()
-
-        # 网络结构：状态 -> 隐藏层 -> 动作
-        self.l1 = nn.Linear(state_dim, hidden_size)
-        self.l2 = nn.Linear(hidden_size, action_dim)
-
-        self.action_dim = action_dim
-
-        # 初始化所有权重为零
-        for p in self.parameters():
-            p.data = torch.zeros(p.shape)
-
-    def forward(self, state):
-        """前向传播"""
-        a = self.l1(state)
-        a = self.l2(a)
-        self.action = a  # 存储当前动作
-        return a
-
-    def get_action(self):
-        """获取最后计算的动作"""
-        return self.action
-
-
-class FF_Actor(Actor):
-    """前馈神经网络策略 - 多层感知机"""
-
-    def __init__(self, state_dim, action_dim, layers=(256, 256), env_name=None, nonlinearity=F.relu, max_action=1):
-        super(FF_Actor, self).__init__()
-
-        # 构建多层网络
-        self.actor_layers = nn.ModuleList()
-        self.actor_layers += [nn.Linear(state_dim, layers[0])]  # 输入层
-        for i in range(len(layers) - 1):
-            self.actor_layers += [nn.Linear(layers[i], layers[i + 1])]  # 隐藏层
-        self.network_out = nn.Linear(layers[-1], action_dim)  # 输出层
-
-        self.action = None
-        self.action_dim = action_dim
-        self.env_name = env_name
-        self.nonlinearity = nonlinearity  # 激活函数
-
-        self.initialize_parameters()  # 初始化参数
-
-        self.max_action = max_action  # 动作范围限制
-
-    def forward(self, state, deterministic=True):
-        """前向传播 - 输出确定性动作"""
-        x = state
-        # 前向传播通过所有层
-        for idx, layer in enumerate(self.actor_layers):
-            x = self.nonlinearity(layer(x))
-
-        # 使用tanh将输出限制在[-1, 1]范围内
-        self.action = torch.tanh(self.network_out(x))
-        # 缩放到最大动作范围
-        return self.action * self.max_action
-
-    def get_action(self):
-        return self.action
-
-
-class LSTM_Actor(Actor):
-    """LSTM循环神经网络策略 - 用于处理序列数据"""
-
-    def __init__(self, state_dim, action_dim, layers=(128, 128), env_name=None, nonlinearity=torch.tanh, max_action=1):
-        super(LSTM_Actor, self).__init__()
-
-        # 构建LSTM层
-        self.actor_layers = nn.ModuleList()
-        self.actor_layers += [nn.LSTMCell(state_dim, layers[0])]  # 第一层LSTM
-        for i in range(len(layers) - 1):
-            self.actor_layers += [nn.LSTMCell(layers[i], layers[i + 1])]  # 后续LSTM层
-        self.network_out = nn.Linear(layers[i - 1], action_dim)  # 输出层
-
-        self.action = None
-        self.action_dim = action_dim
-        self.init_hidden_state()  # 初始化隐藏状态
-        self.env_name = env_name
-        self.nonlinearity = nonlinearity
-
-        self.is_recurrent = True  # 标记为循环网络
-
-        self.max_action = max_action
-
-    def get_hidden_state(self):
-        """获取当前隐藏状态"""
-        return self.hidden, self.cells
-
-    def set_hidden_state(self, data):
-        """设置隐藏状态"""
-        if len(data) != 2:
-            print("Got invalid hidden state data.")
-            exit(1)
-
-        self.hidden, self.cells = data
-
-    def init_hidden_state(self, batch_size=1):
-        """初始化隐藏状态为零"""
-        self.hidden = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
-        self.cells = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
-
-    def forward(self, x, deterministic=True):
-        """前向传播，支持不同维度的输入"""
-        dims = len(x.size())
-
-        # 处理轨迹批次输入 (序列长度, 批次大小, 状态维度)
-        if dims == 3:
-            self.init_hidden_state(batch_size=x.size(1))
-            y = []
-            # 按时间步处理序列
-            for t, x_t in enumerate(x):
-                for idx, layer in enumerate(self.actor_layers):
-                    c, h = self.cells[idx], self.hidden[idx]
-                    # LSTM前向传播
-                    self.hidden[idx], self.cells[idx] = layer(x_t, (h, c))
-                    x_t = self.hidden[idx]
-                y.append(x_t)
-            x = torch.stack([x_t for x_t in y])
-
-        else:
-            # 处理单步输入
-            if dims == 1:  # 单个时间步
-                x = x.view(1, -1)
-
-            # 单步前向传播
-            for idx, layer in enumerate(self.actor_layers):
-                h, c = self.hidden[idx], self.cells[idx]
-                self.hidden[idx], self.cells[idx] = layer(x, (h, c))
-                x = self.hidden[idx]
-            x = self.nonlinearity(self.network_out(x))
-
-            if dims == 1:
-                x = x.view(-1)
-
-        self.action = self.network_out(x)
-        return self.action
-
-    def get_action(self):
-        return self.action
-
-
 class Gaussian_FF_Actor(Actor):
-    """高斯前馈策略网络 - 输出动作的概率分布（用于PPO等随机策略算法）"""
+    """高斯前馈策略网络 - 输出动作的概率分布
+    
+    该网络输出高斯分布（正态分布）的均值和标准差，用于表示随机策略。
+    """
 
-    def __init__(self, state_dim, action_dim, layers=(256, 256), env_name=None, nonlinearity=torch.nn.functional.relu,
-                 fixed_std=None, bounded=False, normc_init=True):
+    def __init__(self, state_dim, action_dim, layers=(256, 256), env_name=None, 
+                 nonlinearity=torch.nn.functional.relu, fixed_std=None, bounded=False, normc_init=True):
+        """初始化高斯前馈策略网络
+        
+        参数:
+            state_dim (int): 状态空间的维度
+            action_dim (int): 动作空间的维度
+            layers (tuple): 隐藏层的维度，默认为(256, 256)表示两个256维的隐藏层
+            env_name (str, optional): 环境名称
+            nonlinearity (callable): 激活函数，默认为ReLU
+            fixed_std (float, optional): 如果提供固定值，则使用固定的标准差；否则学习标准差
+            bounded (bool): 是否使用tanh将动作限制在[-1, 1]范围内
+            normc_init (bool): 是否使用PPO论文中的权重初始化方法（归一化初始化）
+        """
         super(Gaussian_FF_Actor, self).__init__()
 
-        # 网络结构
+        # ==================== 网络结构构建 ====================
+        # 使用ModuleList来存储所有的隐藏层，这样PyTorch能正确识别需要训练的参数
         self.actor_layers = nn.ModuleList()
+        
+        # 添加输入层：从状态维度映射到第一个隐藏层的维度
         self.actor_layers += [nn.Linear(state_dim, layers[0])]
+        
+        # 添加中间隐藏层：连接相邻的隐藏层
         for i in range(len(layers) - 1):
             self.actor_layers += [nn.Linear(layers[i], layers[i + 1])]
-        self.means = nn.Linear(layers[-1], action_dim)  # 均值输出层
+        
+        # 均值输出层：将最后一个隐藏层的输出映射到动作空间维度
+        # 这个层输出的是高斯分布的均值向量
+        self.means = nn.Linear(layers[-1], action_dim)
 
-        # 标准差处理：可学习或固定
+        # ==================== 标准差处理 ====================
+        # 标准差决定了策略的探索程度（动作的离散程度）
         if fixed_std is None:
+            # 可学习标准差：网络学习对数标准差（log std），因为标准差必须为正数
+            # 使用对数形式可以避免约束问题，且exp()后自动为正
             self.log_stds = nn.Linear(layers[-1], action_dim)  # 对数标准差输出层
-            self.learn_std = True  # 可学习标准差
+            self.learn_std = True  # 标志位：标准差是可学习的
         else:
-            self.fixed_std = fixed_std  # 固定标准差
+            # 固定标准差：使用给定的常数值，不参与训练
+            # 这样可以减少计算量，但可能降低策略的灵活性
+            self.fixed_std = fixed_std  # 固定的标准差
             self.learn_std = False
 
-        self.action = None
-        self.action_dim = action_dim
-        self.env_name = env_name
-        self.nonlinearity = nonlinearity
 
-        # 观察值归一化参数（默认不归一化）
-        self.obs_std = 1.0
-        self.obs_mean = 0.0
+        self.action = None                # 存储最新采样的动作，方便后续访问
+        self.action_dim = action_dim      # 保存动作维度
+        self.env_name = env_name          # 保存环境名称（某些环境可能需要特殊处理）
+        self.nonlinearity = nonlinearity  # 保存激活函数
+
+
+        self.obs_std = 1.0    # 观察值的标准差，用于归一化
+        self.obs_mean = 0.0   # 观察值的均值，用于归一化
 
         # 是否使用PPO论文中的权重初始化方案
+        # normc_init是OpenAI Baselines中常用的一种初始化方法
         self.normc_init = normc_init
 
         # 是否对均值输出使用tanh限制
+        # 如果环境动作空间有界（如[-1, 1]），可以启用这个选项
         self.bounded = bounded
 
+        # 初始化网络参数
         self.init_parameters()
 
     def init_parameters(self):
-        """初始化网络参数"""
+        """初始化网络参数
+        
+        根据normc_init标志选择不同的初始化策略。
+        normc_init是PPO论文作者推荐的方法，可以稳定训练过程。
+        """
         if self.normc_init:
-            self.apply(normc_fn)  # 应用归一化初始化
-            self.means.weight.data.mul_(0.01)  # 均值层权重缩小
+            # 对整个网络应用归一化初始化函数
+            # normc_fn函数会将权重矩阵按列进行归一化，使得初始输出分布更稳定
+            self.apply(normc_fn)
+            
+            # 特别对均值输出层进行特殊处理：将权重缩小100倍
+            # 这样做的目的是使初始策略接近均匀分布（输出接近0），避免初始策略过于确定
+            # 在连续动作空间中，初始输出接近0有助于稳定探索
+            self.means.weight.data.mul_(0.01)
 
     def _get_dist_params(self, state):
-        """获取分布参数：均值和标准差"""
-        # 观察值归一化
+        """获取高斯分布的参数：均值和标准差
+        
+        这是网络的核心计算逻辑，将输入状态转换为概率分布的参数。
+        
+        参数:
+            state (tensor): 输入状态，形状为 [batch_size, state_dim]
+            
+        返回:
+            tuple: (mean, sd) 均值和标准差
+                   mean形状为 [batch_size, action_dim]
+                   sd形状为 [batch_size, action_dim] 或标量（固定标准差时）
+        """
+  
+        # 将输入状态归一化到零均值单位方差，有助于训练稳定性
         state = (state - self.obs_mean) / self.obs_std
 
         x = state
-        # 前向传播
-        for l in self.actor_layers:
-            x = self.nonlinearity(l(x))
+        # 依次通过所有隐藏层，每层后应用激活函数
+        for layer in self.actor_layers:
+            x = self.nonlinearity(layer(x))
+        
+        # 计算均值：隐藏层输出通过线性层得到动作的均值
         mean = self.means(x)
 
-        # 可选：对均值输出使用tanh限制
+        # ==================== 可选：对均值输出进行范围限制 ====================
+        # 如果环境动作空间有界，使用tanh将输出限制在[-1, 1]范围内
+        # 这对于像Mujoco这样的连续控制环境非常重要
         if self.bounded:
-            mean = torch.tanh(mean)
+            mean = torch.tanh(mean)  # tanh输出范围[-1, 1]
 
-        # 计算标准差
+        # ==================== 计算标准差 ====================
         if self.learn_std:
-            # 可学习标准差（使用复杂的变换确保正值和合理范围）
-            sd = (-2 + 0.5 * torch.tanh(self.log_stds(x))).exp()
+            # 可学习标准差：使用复杂的变换确保标准差在合理范围内
+            # 公式: sd = exp(-2 + 0.5 * tanh(log_std_output))
+            # 这样的设计确保标准差范围在 [exp(-2.5), exp(-1.5)] ≈ [0.08, 0.22]
+            # 1. tanh将输出限制在[-1, 1]之间
+            # 2. 乘以0.5后范围变成[-0.5, 0.5]
+            # 3. 加上-2后范围变成[-2.5, -1.5]
+            # 4. exp后得到[0.08, 0.22]的范围
+            # 这个范围是经验上对大多数连续控制问题有效的探索程度
+            log_std_output = self.log_stds(x)  # 原始对数标准差输出
+            sd = (-2 + 0.5 * torch.tanh(log_std_output)).exp()
         else:
-            sd = self.fixed_std  # 固定标准差
+            # 固定标准差：直接使用预设值
+            # 可以是标量或与动作维度相同的向量
+            sd = self.fixed_std
 
         return mean, sd
 
     def forward(self, state, deterministic=True, anneal=1.0):
-        """前向传播
-
+        """前向传播：根据策略选择动作
+        
         参数:
-            deterministic: 是否使用确定性策略（输出均值）
-            anneal: 退火系数，用于调整探索程度
+            state (tensor): 当前状态
+            deterministic (bool): 
+                True - 使用确定性策略（直接输出均值），用于评估/测试
+                False - 使用随机策略（从分布中采样），用于训练/探索
+            anneal (float): 探索退火系数，范围为(0, 1]
+                用于在训练过程中逐渐减小标准差，降低探索程度
+                值越小，探索越少，动作越确定
+        
+        返回:
+            tensor: 选择的动作，形状为 [batch_size, action_dim]
         """
+        # 获取高斯分布的参数
         mu, sd = self._get_dist_params(state)
-        sd *= anneal  # 应用退火
+        
+        # 应用退火：随着训练进行，逐步减小标准差以降低探索
+        # 这是常见的探索策略：早期多探索，后期少探索
+        sd *= anneal
 
         if not deterministic:
-            # 随机策略：从正态分布中采样
+            # ==================== 随机策略模式 ====================
+            # 从高斯分布中采样得到动作
+            # 这是标准的随机策略梯度方法使用的探索方式
+            # Normal(mu, sd) 创建一个高斯分布对象，sample()从中采样
             self.action = torch.distributions.Normal(mu, sd).sample()
         else:
-            # 确定性策略：直接使用均值
+            # ==================== 确定性策略模式 ====================
+            # 直接使用均值作为动作，不进行探索
+            # 这用于评估策略性能或部署时使用
             self.action = mu
 
         return self.action
 
     def get_action(self):
+        """获取最近一次前向传播选择的动作
+        
+        返回:
+            tensor: 最近采样的动作
+        """
         return self.action
 
     def distribution(self, inputs):
-        """返回动作的概率分布对象（用于PPO计算概率比）"""
+        """返回动作的概率分布对象
+        
+        这是PPO算法中需要的关键方法，用于计算新旧策略的概率比。
+        
+        参数:
+            inputs (tensor): 输入状态
+            
+        返回:
+            torch.distributions.Normal: 高斯分布对象
+                包含均值和标准差，可以计算:
+                - log_prob(action): 动作的对数概率
+                - entropy(): 分布的熵（用于探索程度估计）
+        """
+        # 获取分布的参数
         mu, sd = self._get_dist_params(inputs)
+        
+        # 返回PyTorch内置的正态分布对象
         return torch.distributions.Normal(mu, sd)
 
-
-class Gaussian_LSTM_Actor(Actor):
-    """高斯LSTM策略网络 - 结合循环网络和随机策略"""
-
-    def __init__(self, state_dim, action_dim, layers=(128, 128), env_name=None, nonlinearity=F.tanh, normc_init=False,
-                 max_action=1, fixed_std=None):
-        super(Gaussian_LSTM_Actor, self).__init__()
-
-        # LSTM网络结构
-        self.actor_layers = nn.ModuleList()
-        self.actor_layers += [nn.LSTMCell(state_dim, layers[0])]
-        for i in range(len(layers) - 1):
-            self.actor_layers += [nn.LSTMCell(layers[i], layers[i + 1])]
-        self.network_out = nn.Linear(layers[i - 1], action_dim)
-
-        self.action = None
-        self.action_dim = action_dim
-        self.init_hidden_state()
-        self.env_name = env_name
-        self.nonlinearity = nonlinearity
-        self.max_action = max_action
-
-        # 观察值归一化参数
-        self.obs_std = 1.0
-        self.obs_mean = 0.0
-
-        self.is_recurrent = True
-
-        # 标准差处理
-        if fixed_std is None:
-            self.log_stds = nn.Linear(layers[-1], action_dim)
-            self.learn_std = True
-        else:
-            self.fixed_std = fixed_std
-            self.learn_std = False
-
-        if normc_init:
-            self.initialize_parameters()
-
-        self.act = self.forward  # 别名
-
-    def _get_dist_params(self, state):
-        """获取分布参数（支持序列输入）"""
-        state = (state - self.obs_mean) / self.obs_std
-
-        dims = len(state.size())
-
-        x = state
-        # 处理序列输入
-        if dims == 3:  # 轨迹批次
-            self.init_hidden_state(batch_size=x.size(1))
-            action = []
-            y = []
-            # 按时间步处理
-            for t, x_t in enumerate(x):
-                for idx, layer in enumerate(self.actor_layers):
-                    c, h = self.cells[idx], self.hidden[idx]
-                    self.hidden[idx], self.cells[idx] = layer(x_t, (h, c))
-                    x_t = self.hidden[idx]
-                y.append(x_t)
-            x = torch.stack([x_t for x_t in y])
-
-        else:
-            # 处理单步输入
-            if dims == 1:
-                x = x.view(1, -1)
-
-            for idx, layer in enumerate(self.actor_layers):
-                h, c = self.hidden[idx], self.cells[idx]
-                self.hidden[idx], self.cells[idx] = layer(x, (h, c))
-                x = self.hidden[idx]
-
-            if dims == 1:
-                x = x.view(-1)
-
-        # 计算均值和标准差
-        mu = self.network_out(x)
-        if self.learn_std:
-            # 限制对数标准差范围后取指数
-            sd = torch.clamp(self.log_stds(x), LOG_STD_LO, LOG_STD_HI).exp()
-        else:
-            sd = self.fixed_std
-
-        return mu, sd
-
-    def init_hidden_state(self, batch_size=1):
-        """初始化LSTM隐藏状态"""
-        self.hidden = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
-        self.cells = [torch.zeros(batch_size, l.hidden_size) for l in self.actor_layers]
-
-    def forward(self, state, deterministic=True, anneal=1.0):
-        """前向传播"""
-        mu, sd = self._get_dist_params(state)
-        sd *= anneal  # 探索退火
-
-        if not deterministic:
-            self.action = torch.distributions.Normal(mu, sd).sample()
-        else:
-            self.action = mu
-
-        return self.action
-
-    def distribution(self, inputs):
-        """返回动作分布"""
-        mu, sd = self._get_dist_params(inputs)
-        return torch.distributions.Normal(mu, sd)
-
-    def get_action(self):
-        return self.action
 
 
 # 初始化函数（来自PPO论文的初始化方案）

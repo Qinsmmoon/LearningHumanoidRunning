@@ -6,13 +6,13 @@ def _calc_arm_swing_coordination(self):
     计算手臂摆动协调性奖励
     鼓励手臂与腿部运动的协调性（对侧摆动模式）
     """
-    # 获取腿部关节速度（假设前12个是腿部关节）
+    # 获取腿部关节速度（前12个是腿部关节）
     leg_velocities = np.array(self._client.get_act_joint_velocities()[:12])
 
-    # 获取手臂关节速度（假设接下来的14个是手臂关节）
+    # 获取手臂关节速度（接下来的14个是手臂关节）
     arm_velocities = np.array(self._client.get_act_joint_velocities()[12:26])
 
-    # 分离左右腿和手臂
+    # 分离左右腿和手臂 计算左右腿的平均速度和左右手臂的平均速度
     right_leg_vel = np.mean(np.abs(leg_velocities[:6]))  # 右腿
     left_leg_vel = np.mean(np.abs(leg_velocities[6:12]))  # 左腿
     right_arm_vel = np.mean(np.abs(arm_velocities[:7]))  # 右臂

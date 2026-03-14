@@ -7,9 +7,9 @@ class RobotInterface(object):
         self.model = model
         self.data = data
 
-        self.rfoot_body_name = rfoot_body_name
-        self.lfoot_body_name = lfoot_body_name
-        self.floor_body_name = 'world'
+        self.rfoot_body_name = rfoot_body_name # 右脚身体名称
+        self.lfoot_body_name = lfoot_body_name # 左脚身体名称
+        self.floor_body_name = 'world' # 地面名称
 
     def nq(self):
         return self.model.nq

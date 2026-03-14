@@ -1,0 +1,29 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "debug",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/debug_stepper.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": ".:${PYTHONPATH}"
+            },
+            "args": ["--path", "experiments/jvcr_run_arm/"]
+        },
+        {
+            "name": "run",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "run_experiment.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["train", "--logdir", "vscode_debug_log", "--num_procs", "1", "--env", "jvrc_run_arm", "--local_mode", "true"]
+        }
+    ]
+}

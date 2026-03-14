@@ -16,7 +16,7 @@ class JvrcRunArmEnv(mujoco_env.MujocoEnv):
 
     def __init__(self):
         # 时间步长设置
-        sim_dt = 0.0025  # 仿真步长：2.5毫秒
+        sim_dt = 0.0025     # 仿真步长：2.5毫秒
         control_dt = 0.025  # 控制步长：25毫秒
         frame_skip = (control_dt / sim_dt)  # 帧跳过：每10个仿真步执行一次控制
 
@@ -29,7 +29,7 @@ class JvrcRunArmEnv(mujoco_env.MujocoEnv):
 
         # PD控制器增益设置（比例-微分控制）
         # 扩展PD增益：12个腿部关节 + 14个手臂关节 = 26个关节
-        pdgains = np.zeros((26, 2))  # 从12改为26
+        pdgains = np.zeros((26, 2))  # [26 2]数组，第一列为P增益，第二列为D增益
         coeff = 0.7
         # 腿部PD增益（保持不变）
         leg_p_gains = [200, 200, 200, 250, 80, 80,  # 右腿
@@ -37,7 +37,7 @@ class JvrcRunArmEnv(mujoco_env.MujocoEnv):
         leg_d_gains = [20, 20, 20, 25, 8, 8,  # 右腿
                        20, 20, 20, 25, 8, 8]  # 左腿
 
-        # 手臂PD增益（新增）- 比腿部增益小，因为手臂不需要那么强的控制
+        # 手臂PD增益 - 比腿部增益小，因为手臂不需要那么强的控制
         arm_p_gains = [150, 100, 120, 80, 60, 40, 30,  # 右臂：肩部3 + 肘部2 + 腕部2
                        150, 100, 120, 80, 60, 40, 30]  # 左臂：肩部3 + 肘部2 + 腕部2
         arm_d_gains = [15, 10, 12, 8, 6, 4, 3,  # 右臂
@@ -192,48 +192,6 @@ class JvrcRunArmEnv(mujoco_env.MujocoEnv):
         assert state.shape == (self.base_obs_len,)  # 现在应该是65维
         return state.flatten()
 
-    # def get_obs(self):
-    #     """获取当前环境的观察向量"""
-    #
-    #     # 外部状态：时钟信号和步态模式
-    #     # 使用正弦和余弦表示相位，提供连续的周期信号
-    #     clock = [np.sin(2 * np.pi * self.task._phase / self.task._period),
-    #              np.cos(2 * np.pi * self.task._phase / self.task._period)]
-    #     # 步态模式编码
-    #     ext_state = np.concatenate((clock, self.task.mode.encode(), [self.task.mode_ref]))
-    #
-    #     # 内部状态：机器人本体状态
-    #     qpos = np.copy(self.interface.get_qpos())  # 位置信息
-    #     qvel = np.copy(self.interface.get_qvel())  # 速度信息
-    #
-    #     # 根节点欧拉角转换（只取横滚和俯仰，忽略偏航）
-    #     root_r, root_p = tf3.euler.quat2euler(qpos[3:7])[0:2]
-    #     # 重新构建四元数（偏航角设为0）
-    #     root_orient = tf3.euler.euler2quat(root_r, root_p, 0)
-    #     # 根节点角速度
-    #     root_ang_vel = qvel[3:6]
-    #
-    #     # 获取电机位置和速度
-    #     motor_pos = self.interface.get_act_joint_positions()
-    #     motor_vel = self.interface.get_act_joint_velocities()
-    #     # 按执行器顺序重新排列
-    #     motor_pos = [motor_pos[i] for i in self.actuators]
-    #     motor_vel = [motor_vel[i] for i in self.actuators]
-    #
-    #     # 构建机器人状态向量
-    #     robot_state = np.concatenate([
-    #         root_orient,  # 4维：根节点朝向（四元数）
-    #         root_ang_vel,  # 3维：根节点角速度
-    #         motor_pos,  # 12维：电机位置
-    #         motor_vel,  # 12维：电机速度
-    #     ])
-    #
-    #     # 合并内部状态和外部状态
-    #     state = np.concatenate([robot_state, ext_state])
-    #
-    #     # 确保观察向量维度正确
-    #     assert state.shape == (self.base_obs_len,)
-    #     return state.flatten()  # 返回扁平化的观察向量
 
     def step(self, a):
         """执行一步环境更新"""
